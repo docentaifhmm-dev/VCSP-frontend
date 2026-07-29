@@ -1,15 +1,16 @@
 /**
- * ClienteVirtualCriarPage — Wizard de 4 etapas para criar um Cliente Virtual
+ * ClienteVirtualCriarPage — Wizard de 5 etapas para criar um Cliente Virtual
  * (persona/paciente/cliente simulado + framework normativo + critérios).
  *
- * Etapa 0 — Cenário base       (título, área, persona, contexto)
- * Etapa 1 — Critérios          (lista de critérios, com assistência de IA)
- * Etapa 2 — Framework          (upload de protocolos/normas de referência)
- * Etapa 3 — Publicação         (modo de feedback + turmas + publicar)
+ * Etapa 0 — Disciplina         (instituição/disciplina/período + plano de ensino + seleção de competências/habilidades/aprendizagens)
+ * Etapa 1 — Cenário base       (título, área, persona, contexto)
+ * Etapa 2 — Critérios          (lista de critérios, com assistência de IA)
+ * Etapa 3 — Framework          (upload de protocolos/normas de referência)
+ * Etapa 4 — Publicação         (modo de feedback + turmas + publicar)
  */
 import { useEffect, useRef, useState } from "react";
 import {
-  MessageSquare, Users, ClipboardList, FileUp, Send,
+  MessageSquare, Users, ClipboardList, FileUp, Send, GraduationCap,
   ChevronRight, ChevronLeft, Loader2, CheckCircle2, AlertCircle,
   Plus, Trash2, Sparkles, Copy, Check, History,
 } from "lucide-react";
@@ -18,7 +19,7 @@ import { Card, Button, Input, Select, Textarea } from "../components/ui";
 
 function cls(...args) { return args.filter(Boolean).join(" "); }
 
-const STEP_LABELS = ["Cenário", "Critérios", "Framework", "Publicação"];
+const STEP_LABELS = ["Disciplina", "Cenário", "Critérios", "Framework", "Publicação"];
 
 const AREAS = [
   { value: "geral", label: "Geral" },
@@ -64,6 +65,15 @@ const DEFAULT_FORM = {
   feedback_modo: "fim_sessao",
 };
 
+const DEFAULT_NOVA_DISCIPLINA = { instituicao_nome: "", disciplina_nome: "", periodo_letivo: "" };
+
+const STATUS_BADGE_CLASS = (status) => cls(
+  "text-xs font-semibold px-2 py-0.5 rounded-full flex-shrink-0",
+  status === "processado" && "bg-emerald-900/40 text-emerald-400",
+  status === "erro" && "bg-red-900/40 text-red-400",
+  ["pendente", "processando"].includes(status) && "bg-amber-900/40 text-amber-400",
+);
+
 export default function ClienteVirtualCriarPage({ setToast, cenarioIdInicial = null, onVoltar }) {
   const [step, setStep] = useState(0);
   const [form, setForm] = useState(DEFAULT_FORM);
@@ -71,6 +81,20 @@ export default function ClienteVirtualCriarPage({ setToast, cenarioIdInicial = n
   const [carregandoCenario, setCarregandoCenario] = useState(!!cenarioIdInicial);
   const [salvando, setSalvando] = useState(false);
   const [erro, setErro] = useState("");
+
+  // ── Disciplina ──────────────────────────────────────────────────────────────
+  const [disciplinas, setDisciplinas] = useState([]);
+  const [disciplinaId, setDisciplinaId] = useState(null);
+  const [novaDisciplina, setNovaDisciplina] = useState(DEFAULT_NOVA_DISCIPLINA);
+  const [criandoDisciplina, setCriandoDisciplina] = useState(false);
+  const [planoDocs, setPlanoDocs] = useState([]);
+  const [uploadingPlano, setUploadingPlano] = useState(false);
+  const planoFileInputRef = useRef(null);
+  const planoPollRef = useRef(null);
+  const [conhecimento, setConhecimento] = useState(null);
+  const [competenciasSelecionadas, setCompetenciasSelecionadas] = useState([]);
+  const [habilidadesSelecionadas, setHabilidadesSelecionadas] = useState([]);
+  const [aprendizagensSelecionadas, setAprendizagensSelecionadas] = useState([]);
 
   const [criterios, setCriterios] = useState([]);
   const [assistindo, setAssistindo] = useState(false);
@@ -93,7 +117,7 @@ export default function ClienteVirtualCriarPage({ setToast, cenarioIdInicial = n
   // Reabrindo um cenário já existente (a partir do dashboard) — carrega os
   // dados já salvos em vez de começar do formulário em branco.
   useEffect(() => {
-    if (!cenarioIdInicial) return;
+    if (!cenarioIdInicial) { return; }
     api.detalharCenarioVirtual(cenarioIdInicial)
       .then((c) => {
         setForm({
@@ -104,22 +128,108 @@ export default function ClienteVirtualCriarPage({ setToast, cenarioIdInicial = n
           feedback_modo: c.feedback_modo,
         });
         setCriterios(c.criterios_avaliacao || []);
+        setDisciplinaId(c.disciplina_id || null);
+        setCompetenciasSelecionadas(c.competencias_selecionadas || []);
+        setHabilidadesSelecionadas(c.habilidades_selecionadas || []);
+        setAprendizagensSelecionadas(c.aprendizagens_selecionadas || []);
       })
       .catch((e) => setErro(e.message || "Erro ao carregar cenário."))
       .finally(() => setCarregandoCenario(false));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  useEffect(() => {
+    api.listarDisciplinas().then((d) => setDisciplinas(d || [])).catch(() => {});
+  }, []);
+
   const set = (key, val) => setForm((f) => ({ ...f, [key]: val }));
 
   const canNext = [
+    true, // disciplina é opcional
     form.titulo.trim().length >= 5 && form.persona_desc.trim().length >= 15 && form.contexto_cenario.trim().length >= 30,
     true, // critérios são opcionais (podem ser gerados por IA depois)
     true, // framework é opcional
     turmasSelecionadas.length > 0,
   ];
 
-  // ── Etapa 0: salvar cenário base ──────────────────────────────────────────
+  // ── Etapa 0: disciplina, plano de ensino e seleção pedagógica ────────────────
+
+  const carregarPlanoDocs = async (discId) => {
+    if (!discId) return;
+    try {
+      const data = await api.listarPlanoEnsino(discId);
+      setPlanoDocs(data || []);
+    } catch { /* silencioso */ }
+  };
+
+  const carregarConhecimento = async (discId) => {
+    if (!discId) return;
+    try {
+      const data = await api.obterConhecimentoDisciplina(discId);
+      setConhecimento(data);
+    } catch {
+      setConhecimento(null);
+    }
+  };
+
+  useEffect(() => {
+    if (!disciplinaId) { setPlanoDocs([]); setConhecimento(null); return; }
+    carregarPlanoDocs(disciplinaId);
+    carregarConhecimento(disciplinaId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [disciplinaId]);
+
+  useEffect(() => {
+    if (step !== 0 || !disciplinaId) return;
+    planoPollRef.current = setInterval(() => {
+      setPlanoDocs((atual) => {
+        const temPendente = atual.some((d) => ["pendente", "processando"].includes(d.status_processamento));
+        if (temPendente) {
+          carregarPlanoDocs(disciplinaId);
+          carregarConhecimento(disciplinaId);
+        }
+        return atual;
+      });
+    }, 4000);
+    return () => clearInterval(planoPollRef.current);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [step, disciplinaId]);
+
+  const criarNovaDisciplina = async () => {
+    if (!novaDisciplina.instituicao_nome.trim() || !novaDisciplina.disciplina_nome.trim() || !novaDisciplina.periodo_letivo.trim()) return;
+    setCriandoDisciplina(true); setErro("");
+    try {
+      const criada = await api.criarDisciplina(novaDisciplina);
+      setDisciplinas((d) => [criada, ...d]);
+      setDisciplinaId(criada.id);
+      setNovaDisciplina(DEFAULT_NOVA_DISCIPLINA);
+    } catch (e) {
+      setErro(e.message || "Erro ao criar disciplina.");
+    } finally {
+      setCriandoDisciplina(false);
+    }
+  };
+
+  const handleUploadPlano = async (e) => {
+    const arquivo = e.target.files?.[0];
+    if (!arquivo || !disciplinaId) return;
+    setUploadingPlano(true); setErro("");
+    try {
+      await api.uploadPlanoEnsino(disciplinaId, arquivo);
+      await carregarPlanoDocs(disciplinaId);
+      setToast?.({ message: "Plano de ensino enviado. Extraindo competências, habilidades e aprendizagens...", type: "success" });
+    } catch (e2) {
+      setErro(e2.message || "Erro ao enviar plano de ensino.");
+    } finally {
+      setUploadingPlano(false);
+      if (planoFileInputRef.current) planoFileInputRef.current.value = "";
+    }
+  };
+
+  const toggleSelecionado = (lista, setLista, valor) =>
+    setLista(lista.includes(valor) ? lista.filter((x) => x !== valor) : [...lista, valor]);
+
+  // ── Etapa 1: salvar cenário base ──────────────────────────────────────────
 
   const salvarCenarioBase = async () => {
     setErro(""); setSalvando(true);
@@ -130,6 +240,10 @@ export default function ClienteVirtualCriarPage({ setToast, cenarioIdInicial = n
         persona_desc: form.persona_desc,
         contexto_cenario: form.contexto_cenario,
         feedback_modo: form.feedback_modo,
+        disciplina_id: disciplinaId || null,
+        competencias_selecionadas: competenciasSelecionadas,
+        habilidades_selecionadas: habilidadesSelecionadas,
+        aprendizagens_selecionadas: aprendizagensSelecionadas,
       };
       if (cenarioId) {
         await api.atualizarCenarioVirtual(cenarioId, payload);
@@ -138,7 +252,7 @@ export default function ClienteVirtualCriarPage({ setToast, cenarioIdInicial = n
         setCenarioId(criado.id);
         setCriterios(criado.criterios_avaliacao || []);
       }
-      setStep(1);
+      setStep(2);
     } catch (e) {
       setErro(e.message || "Erro ao salvar cenário.");
     } finally {
@@ -146,7 +260,7 @@ export default function ClienteVirtualCriarPage({ setToast, cenarioIdInicial = n
     }
   };
 
-  // ── Etapa 1: critérios ────────────────────────────────────────────────────
+  // ── Etapa 2: critérios ────────────────────────────────────────────────────
 
   const adicionarCriterio = () => setCriterios((c) => [...c, { criterio: "", peso: 3, descricao: "" }]);
   const removerCriterio = (i) => setCriterios((c) => c.filter((_, idx) => idx !== i));
@@ -156,7 +270,7 @@ export default function ClienteVirtualCriarPage({ setToast, cenarioIdInicial = n
     setErro(""); setSalvando(true);
     try {
       await api.atualizarCenarioVirtual(cenarioId, { criterios_avaliacao: criterios });
-      setStep(2);
+      setStep(3);
     } catch (e) {
       setErro(e.message || "Erro ao salvar critérios.");
     } finally {
@@ -177,7 +291,7 @@ export default function ClienteVirtualCriarPage({ setToast, cenarioIdInicial = n
     }
   };
 
-  // ── Etapa 2: framework ────────────────────────────────────────────────────
+  // ── Etapa 3: framework ────────────────────────────────────────────────────
 
   const carregarFrameworks = async () => {
     if (!cenarioId) return;
@@ -188,7 +302,7 @@ export default function ClienteVirtualCriarPage({ setToast, cenarioIdInicial = n
   };
 
   useEffect(() => {
-    if (step !== 2 || !cenarioId) return;
+    if (step !== 3 || !cenarioId) return;
     carregarFrameworks();
     // Polling simples enquanto houver documento pendente/processando
     pollRef.current = setInterval(() => {
@@ -218,10 +332,10 @@ export default function ClienteVirtualCriarPage({ setToast, cenarioIdInicial = n
     }
   };
 
-  // ── Etapa 3: turmas e publicação ──────────────────────────────────────────
+  // ── Etapa 4: turmas e publicação ──────────────────────────────────────────
 
   useEffect(() => {
-    if (step !== 3) return;
+    if (step !== 4) return;
     api.listarTurmasVirtuais().then((data) => setTurmas(data || [])).catch(() => {});
   }, [step]);
 
@@ -291,6 +405,9 @@ export default function ClienteVirtualCriarPage({ setToast, cenarioIdInicial = n
     setStep(0); setForm(DEFAULT_FORM); setCenarioId(null);
     setCriterios([]); setFrameworks([]); setTurmasSelecionadas([]);
     setAlunosPorTurma({}); setTurmaExpandida(null); setPublicado(false); setErro("");
+    setDisciplinaId(null); setConhecimento(null); setPlanoDocs([]);
+    setCompetenciasSelecionadas([]); setHabilidadesSelecionadas([]); setAprendizagensSelecionadas([]);
+    setNovaDisciplina(DEFAULT_NOVA_DISCIPLINA);
   };
 
   // ── render — carregando cenário existente ─────────────────────────────────
@@ -320,6 +437,12 @@ export default function ClienteVirtualCriarPage({ setToast, cenarioIdInicial = n
       </div>
     );
   }
+
+  const gruposConhecimento = conhecimento ? [
+    { campo: "competencias", label: "Competências", lista: conhecimento.competencias || [], sel: competenciasSelecionadas, setSel: setCompetenciasSelecionadas },
+    { campo: "habilidades", label: "Habilidades", lista: conhecimento.habilidades || [], sel: habilidadesSelecionadas, setSel: setHabilidadesSelecionadas },
+    { campo: "aprendizagens", label: "Aprendizagens", lista: conhecimento.aprendizagens || [], sel: aprendizagensSelecionadas, setSel: setAprendizagensSelecionadas },
+  ] : [];
 
   return (
     <div className="space-y-6 max-w-3xl mx-auto">
@@ -351,8 +474,111 @@ export default function ClienteVirtualCriarPage({ setToast, cenarioIdInicial = n
         </div>
       )}
 
-      {/* ── Etapa 0 — Cenário base ── */}
+      {/* ── Etapa 0 — Disciplina ── */}
       {step === 0 && (
+        <Card className="space-y-4">
+          <div>
+            <h2 className="text-lg font-bold text-white flex items-center gap-2">
+              <GraduationCap size={18} className="text-amber-400" /> Disciplina (opcional)
+            </h2>
+            <p className="text-slate-400 text-sm">
+              Vincule esta atividade a uma disciplina para extrair competências, habilidades e
+              aprendizagens do plano de ensino e selecionar quais serão trabalhadas neste caso.
+            </p>
+          </div>
+
+          <Select
+            label="Disciplina"
+            value={disciplinaId || ""}
+            onChange={(e) => setDisciplinaId(e.target.value || null)}
+            options={[
+              { value: "", label: "Nenhuma — não vincular a uma disciplina" },
+              ...disciplinas.map((d) => ({
+                value: d.id,
+                label: `${d.disciplina_nome} — ${d.instituicao_nome} (${d.periodo_letivo})`,
+              })),
+            ]}
+          />
+
+          <div className="border-t border-slate-700/40 pt-4 space-y-3">
+            <p className="text-xs text-slate-500 font-semibold">Cadastrar nova disciplina</p>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+              <input
+                value={novaDisciplina.instituicao_nome}
+                onChange={(e) => setNovaDisciplina((n) => ({ ...n, instituicao_nome: e.target.value }))}
+                placeholder="Instituição"
+                className="bg-slate-800/60 border border-slate-600/50 rounded-lg px-3 py-2 text-sm text-slate-100"
+              />
+              <input
+                value={novaDisciplina.disciplina_nome}
+                onChange={(e) => setNovaDisciplina((n) => ({ ...n, disciplina_nome: e.target.value }))}
+                placeholder="Disciplina"
+                className="bg-slate-800/60 border border-slate-600/50 rounded-lg px-3 py-2 text-sm text-slate-100"
+              />
+              <input
+                value={novaDisciplina.periodo_letivo}
+                onChange={(e) => setNovaDisciplina((n) => ({ ...n, periodo_letivo: e.target.value }))}
+                placeholder="Período (ex: 2026/1)"
+                className="bg-slate-800/60 border border-slate-600/50 rounded-lg px-3 py-2 text-sm text-slate-100"
+              />
+            </div>
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={criarNovaDisciplina}
+              disabled={criandoDisciplina || !novaDisciplina.instituicao_nome.trim() || !novaDisciplina.disciplina_nome.trim() || !novaDisciplina.periodo_letivo.trim()}
+            >
+              {criandoDisciplina ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />} Criar disciplina
+            </Button>
+          </div>
+
+          {disciplinaId && (
+            <div className="border-t border-slate-700/40 pt-4 space-y-3">
+              <p className="text-xs text-slate-500 font-semibold">Plano de ensino</p>
+              <label className="flex flex-col items-center justify-center gap-2 border-2 border-dashed border-slate-600/50 rounded-xl p-6 cursor-pointer hover:border-amber-500/40 transition-colors">
+                <FileUp size={22} className="text-slate-500" />
+                <span className="text-xs text-slate-400">{uploadingPlano ? "Enviando..." : "Clique para enviar o plano de ensino (PDF, DOCX, TXT)"}</span>
+                <input ref={planoFileInputRef} type="file" className="hidden" onChange={handleUploadPlano} disabled={uploadingPlano} accept=".pdf,.docx,.doc,.txt,.md" />
+              </label>
+
+              <div className="space-y-1.5">
+                {planoDocs.map((d) => (
+                  <div key={d.id} className="flex items-center justify-between gap-2 bg-slate-900/40 border border-slate-700/40 rounded-lg px-3 py-2">
+                    <span className="text-slate-300 text-xs truncate">{d.nome_original}</span>
+                    <span className={STATUS_BADGE_CLASS(d.status_processamento)}>{d.status_processamento}</span>
+                  </div>
+                ))}
+              </div>
+
+              {gruposConhecimento.some((g) => g.lista.length > 0) && (
+                <div className="space-y-4 pt-2">
+                  {gruposConhecimento.filter((g) => g.lista.length > 0).map(({ campo, label, lista, sel, setSel }) => (
+                    <div key={campo}>
+                      <p className="text-xs text-slate-500 mb-1.5">{label} — selecione as trabalhadas nesta atividade</p>
+                      <div className="space-y-1">
+                        {lista.map((item) => (
+                          <label key={item} className="flex items-start gap-2 text-xs text-slate-300 bg-slate-900/30 rounded-lg px-3 py-2 cursor-pointer hover:bg-slate-900/50">
+                            <input
+                              type="checkbox"
+                              className="mt-0.5"
+                              checked={sel.includes(item)}
+                              onChange={() => toggleSelecionado(sel, setSel, item)}
+                            />
+                            {item}
+                          </label>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </Card>
+      )}
+
+      {/* ── Etapa 1 — Cenário base ── */}
+      {step === 1 && (
         <Card className="space-y-4">
           <Input label="Título do cenário" value={form.titulo} onChange={(e) => set("titulo", e.target.value)} placeholder="Ex: Atendimento de paciente com dor torácica" />
           <Select label="Área" value={form.area} onChange={(e) => set("area", e.target.value)} options={AREAS} />
@@ -373,8 +599,8 @@ export default function ClienteVirtualCriarPage({ setToast, cenarioIdInicial = n
         </Card>
       )}
 
-      {/* ── Etapa 1 — Critérios ── */}
-      {step === 1 && (
+      {/* ── Etapa 2 — Critérios ── */}
+      {step === 2 && (
         <Card className="space-y-4">
           <div className="flex items-center justify-between">
             <div>
@@ -424,8 +650,8 @@ export default function ClienteVirtualCriarPage({ setToast, cenarioIdInicial = n
         </Card>
       )}
 
-      {/* ── Etapa 2 — Framework ── */}
-      {step === 2 && (
+      {/* ── Etapa 3 — Framework ── */}
+      {step === 3 && (
         <Card className="space-y-4">
           <div>
             <h2 className="text-lg font-bold text-white">Framework de referência</h2>
@@ -442,12 +668,7 @@ export default function ClienteVirtualCriarPage({ setToast, cenarioIdInicial = n
             {frameworks.map((f) => (
               <div key={f.id} className="flex items-center justify-between bg-slate-900/40 border border-slate-700/40 rounded-xl px-4 py-3">
                 <span className="text-slate-300 text-sm truncate">{f.nome_original}</span>
-                <span className={cls(
-                  "text-xs font-semibold px-2 py-1 rounded-full",
-                  f.status_processamento === "processado" && "bg-emerald-900/40 text-emerald-400",
-                  f.status_processamento === "erro" && "bg-red-900/40 text-red-400",
-                  ["pendente", "processando"].includes(f.status_processamento) && "bg-amber-900/40 text-amber-400",
-                )}>
+                <span className={STATUS_BADGE_CLASS(f.status_processamento)}>
                   {f.status_processamento}
                 </span>
               </div>
@@ -457,8 +678,8 @@ export default function ClienteVirtualCriarPage({ setToast, cenarioIdInicial = n
         </Card>
       )}
 
-      {/* ── Etapa 3 — Publicação ── */}
-      {step === 3 && (
+      {/* ── Etapa 4 — Publicação ── */}
+      {step === 4 && (
         <div className="space-y-4">
           <Card className="space-y-4">
             <h2 className="text-lg font-bold text-white">Modo de feedback</h2>
@@ -566,22 +787,27 @@ export default function ClienteVirtualCriarPage({ setToast, cenarioIdInicial = n
         </button>
 
         {step === 0 && (
-          <button onClick={salvarCenarioBase} disabled={!canNext[0] || salvando} className={cls("flex items-center gap-2 px-6 py-2.5 rounded-xl text-sm font-bold", canNext[0] && !salvando ? "bg-amber-500 hover:bg-amber-400 text-slate-900" : "bg-slate-700/40 text-slate-500 cursor-not-allowed")}>
-            {salvando ? <Loader2 size={16} className="animate-spin" /> : <>Continuar <ChevronRight size={16} /></>}
+          <button onClick={() => setStep(1)} className="flex items-center gap-2 px-6 py-2.5 rounded-xl text-sm font-bold bg-amber-500 hover:bg-amber-400 text-slate-900">
+            Continuar <ChevronRight size={16} />
           </button>
         )}
         {step === 1 && (
-          <button onClick={salvarCriterios} disabled={salvando} className="flex items-center gap-2 px-6 py-2.5 rounded-xl text-sm font-bold bg-amber-500 hover:bg-amber-400 text-slate-900">
+          <button onClick={salvarCenarioBase} disabled={!canNext[1] || salvando} className={cls("flex items-center gap-2 px-6 py-2.5 rounded-xl text-sm font-bold", canNext[1] && !salvando ? "bg-amber-500 hover:bg-amber-400 text-slate-900" : "bg-slate-700/40 text-slate-500 cursor-not-allowed")}>
             {salvando ? <Loader2 size={16} className="animate-spin" /> : <>Continuar <ChevronRight size={16} /></>}
           </button>
         )}
         {step === 2 && (
-          <button onClick={() => setStep(3)} className="flex items-center gap-2 px-6 py-2.5 rounded-xl text-sm font-bold bg-amber-500 hover:bg-amber-400 text-slate-900">
-            Continuar <ChevronRight size={16} />
+          <button onClick={salvarCriterios} disabled={salvando} className="flex items-center gap-2 px-6 py-2.5 rounded-xl text-sm font-bold bg-amber-500 hover:bg-amber-400 text-slate-900">
+            {salvando ? <Loader2 size={16} className="animate-spin" /> : <>Continuar <ChevronRight size={16} /></>}
           </button>
         )}
         {step === 3 && (
-          <button onClick={publicar} disabled={!canNext[3] || publicando} className={cls("flex items-center gap-2 px-7 py-3 rounded-xl font-bold text-sm", canNext[3] && !publicando ? "bg-amber-500 hover:bg-amber-400 text-slate-900" : "bg-amber-500/50 text-slate-700 cursor-not-allowed")}>
+          <button onClick={() => setStep(4)} className="flex items-center gap-2 px-6 py-2.5 rounded-xl text-sm font-bold bg-amber-500 hover:bg-amber-400 text-slate-900">
+            Continuar <ChevronRight size={16} />
+          </button>
+        )}
+        {step === 4 && (
+          <button onClick={publicar} disabled={!canNext[4] || publicando} className={cls("flex items-center gap-2 px-7 py-3 rounded-xl font-bold text-sm", canNext[4] && !publicando ? "bg-amber-500 hover:bg-amber-400 text-slate-900" : "bg-amber-500/50 text-slate-700 cursor-not-allowed")}>
             {publicando ? <Loader2 size={17} className="animate-spin" /> : <><MessageSquare size={17} /> Publicar</>}
           </button>
         )}

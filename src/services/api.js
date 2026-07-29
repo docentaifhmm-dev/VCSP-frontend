@@ -191,6 +191,58 @@ class ApiService {
   publicarCenarioVirtual(id, turmaIds) {
     return this.request("POST", `/cliente-virtual/professor/cenarios/${id}/publicar`, { turma_ids: turmaIds });
   }
+
+  // ── Cadastro Docente — Disciplinas ────────────────────────────────────────
+
+  listarDisciplinas() {
+    return this.request("GET", "/disciplinas");
+  }
+
+  criarDisciplina(dados) {
+    return this.request("POST", "/disciplinas", dados);
+  }
+
+  deletarDisciplina(id) {
+    return this.request("DELETE", `/disciplinas/${id}`);
+  }
+
+  listarPlanoEnsino(disciplinaId) {
+    return this.request("GET", `/disciplinas/${disciplinaId}/plano-de-ensino`);
+  }
+
+  obterConhecimentoDisciplina(disciplinaId) {
+    return this.request("GET", `/disciplinas/${disciplinaId}/conhecimento`);
+  }
+
+  async uploadPlanoEnsino(disciplinaId, arquivo, _retry = true) {
+    const formData = new FormData();
+    formData.append("arquivo", arquivo);
+
+    const headers = {};
+    if (this._accessToken) headers["Authorization"] = `Bearer ${this._accessToken}`;
+
+    const res = await fetch(`${API_BASE}/disciplinas/${disciplinaId}/plano-de-ensino/upload`, {
+      method: "POST",
+      headers,
+      credentials: "include",
+      body: formData,
+    });
+
+    if (res.status === 401 && _retry) {
+      const renewed = await this._tryRefresh();
+      if (renewed) return this.uploadPlanoEnsino(disciplinaId, arquivo, false);
+    }
+
+    let data;
+    try { data = await res.json(); } catch { throw new Error(`Erro ${res.status}`); }
+    if (!res.ok) {
+      const detail = Array.isArray(data.detail)
+        ? data.detail.map((e) => e.msg || JSON.stringify(e)).join("; ")
+        : data.detail;
+      throw new Error(detail || `Erro ${res.status}`);
+    }
+    return data;
+  }
 }
 
 export const api = new ApiService();
