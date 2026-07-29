@@ -2,19 +2,22 @@
  * ClienteVirtualAlunoApp — mini-app independente para o aluno.
  *
  * Renderizado fora do AuthContext/AppLayout do professor (ver App.jsx —
- * detectarRutaClienteVirtualAluno()). Gerencia seu próprio ciclo de vida:
- * troca do link único por sessão JWT, lista de cenários publicados,
- * histórico de sessões anteriores e a conversa ativa.
+ * isRutaClienteVirtualAluno()). O link é único por TURMA — a primeira coisa
+ * que o app faz é identificar o aluno (nome + matrícula) para então trocar
+ * isso por uma sessão JWT. Gerencia seu próprio ciclo de vida: identificação,
+ * lista de cenários publicados, histórico de sessões anteriores e a conversa
+ * ativa.
  */
 import { useEffect, useState } from "react";
 import { MessageSquare, History, Loader2, AlertCircle, CheckCircle2, Clock } from "lucide-react";
 import { apiAluno } from "../services/apiAluno";
+import { Input, Button } from "../components/ui";
 import ClienteVirtualChatPage from "./ClienteVirtualChatPage";
 
 function cls(...args) { return args.filter(Boolean).join(" "); }
 
 export default function ClienteVirtualAlunoApp({ tokenFromUrl }) {
-  const [status, setStatus] = useState("carregando"); // carregando | erro | lista | chat
+  const [status, setStatus] = useState("carregando"); // carregando | identificar | erro | lista | chat
   const [erro, setErro] = useState("");
   const [alunoInfo, setAlunoInfo] = useState(null);
   const [aba, setAba] = useState("cenarios"); // cenarios | historico
@@ -23,30 +26,60 @@ export default function ClienteVirtualAlunoApp({ tokenFromUrl }) {
   const [iniciandoId, setIniciandoId] = useState(null);
   const [sessaoAtiva, setSessaoAtiva] = useState(null); // { sessao, cenarioTitulo }
 
+  const [nome, setNome] = useState("");
+  const [matricula, setMatricula] = useState("");
+  const [identificando, setIdentificando] = useState(false);
+
+  const turmaToken = tokenFromUrl;
+
+  const carregarPainel = async () => {
+    const [cenariosData, historicoData] = await Promise.all([apiAluno.listarCenarios(), apiAluno.listarHistorico()]);
+    setCenarios(cenariosData || []);
+    setHistorico(historicoData || []);
+    setStatus("lista");
+  };
+
   useEffect(() => {
-    const token = tokenFromUrl || apiAluno.getStoredAccessToken();
-    if (!token) {
-      setErro("Link de acesso não encontrado. Peça ao professor o link da simulação.");
+    if (!turmaToken) {
+      setErro("Link de acesso não encontrado. Peça ao professor o link da turma.");
       setStatus("erro");
       return;
     }
 
-    apiAluno.trocarSessao(token)
-      .then((data) => {
-        setAlunoInfo(data);
-        return Promise.all([apiAluno.listarCenarios(), apiAluno.listarHistorico()]);
-      })
-      .then(([cenariosData, historicoData]) => {
-        setCenarios(cenariosData || []);
-        setHistorico(historicoData || []);
-        setStatus("lista");
-      })
+    const salva = apiAluno.getIdentidadeSalva(turmaToken);
+    if (!salva) {
+      setStatus("identificar");
+      return;
+    }
+
+    apiAluno.entrarNaTurma(turmaToken, salva.nome, salva.matricula)
+      .then((data) => { setAlunoInfo(data); return carregarPainel(); })
       .catch((e) => {
         setErro(e.message || "Não foi possível validar seu acesso.");
         setStatus("erro");
       });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [turmaToken]);
+
+  const identificar = async (e) => {
+    e.preventDefault();
+    setErro(""); setIdentificando(true);
+    try {
+      const data = await apiAluno.entrarNaTurma(turmaToken, nome, matricula);
+      setAlunoInfo(data);
+      await carregarPainel();
+    } catch (e2) {
+      setErro(e2.message || "Não foi possível entrar na turma.");
+    } finally {
+      setIdentificando(false);
+    }
+  };
+
+  const trocarIdentificacao = () => {
+    apiAluno.esquecerIdentidade(turmaToken);
+    setNome(""); setMatricula("");
+    setStatus("identificar");
+  };
 
   const iniciarCenario = async (cenario) => {
     setIniciandoId(cenario.id);
@@ -89,6 +122,30 @@ export default function ClienteVirtualAlunoApp({ tokenFromUrl }) {
     );
   }
 
+  if (status === "identificar") {
+    return (
+      <div className="min-h-screen bg-slate-950 flex items-center justify-center p-6">
+        <div className="w-full max-w-sm bg-slate-800/50 border border-slate-700/50 rounded-2xl p-6 space-y-5">
+          <div className="text-center">
+            <div className="w-12 h-12 bg-amber-500/20 rounded-xl flex items-center justify-center mx-auto mb-3">
+              <MessageSquare size={22} className="text-amber-400" />
+            </div>
+            <h1 className="text-lg font-bold text-white">Identifique-se para continuar</h1>
+            <p className="text-slate-400 text-sm mt-1">Use sempre a mesma matrícula para acompanhar seu histórico.</p>
+          </div>
+          <form onSubmit={identificar} className="space-y-4">
+            <Input label="Nome completo" value={nome} onChange={(e) => setNome(e.target.value)} placeholder="Seu nome" required />
+            <Input label="Matrícula / ID acadêmico" value={matricula} onChange={(e) => setMatricula(e.target.value)} placeholder="Ex: 2024012345" required />
+            {erro && <p className="text-red-400 text-sm">{erro}</p>}
+            <Button type="submit" className="w-full" disabled={identificando}>
+              {identificando ? <Loader2 size={16} className="animate-spin" /> : "Entrar"}
+            </Button>
+          </form>
+        </div>
+      </div>
+    );
+  }
+
   if (status === "erro") {
     return (
       <div className="min-h-screen bg-slate-950 flex items-center justify-center p-6">
@@ -115,9 +172,14 @@ export default function ClienteVirtualAlunoApp({ tokenFromUrl }) {
   return (
     <div className="min-h-screen bg-slate-950 p-6">
       <div className="max-w-2xl mx-auto space-y-6">
-        <div>
-          <h1 className="text-xl font-black text-white">Olá, {alunoInfo?.aluno_nome}</h1>
-          <p className="text-slate-500 text-sm">{alunoInfo?.turma_nome}</p>
+        <div className="flex items-start justify-between">
+          <div>
+            <h1 className="text-xl font-black text-white">Olá, {alunoInfo?.aluno_nome}</h1>
+            <p className="text-slate-500 text-sm">{alunoInfo?.turma_nome}</p>
+          </div>
+          <button onClick={trocarIdentificacao} className="text-xs text-slate-500 hover:text-amber-400">
+            Não é você?
+          </button>
         </div>
 
         <div className="flex gap-2 border-b border-slate-700/40">

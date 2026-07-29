@@ -85,8 +85,8 @@ export default function ClienteVirtualCriarPage({ setToast, cenarioIdInicial = n
   const [novaTurmaNome, setNovaTurmaNome] = useState("");
   const [criandoTurma, setCriandoTurma] = useState(false);
   const [turmaExpandida, setTurmaExpandida] = useState(null);
-  const [alunosTexto, setAlunosTexto] = useState("");
-  const [linksGerados, setLinksGerados] = useState([]);
+  const [alunosPorTurma, setAlunosPorTurma] = useState({}); // turma_id -> lista de alunos
+  const [carregandoAlunos, setCarregandoAlunos] = useState(false);
   const [publicando, setPublicando] = useState(false);
   const [publicado, setPublicado] = useState(false);
 
@@ -242,16 +242,34 @@ export default function ClienteVirtualCriarPage({ setToast, cenarioIdInicial = n
   const toggleTurmaSelecionada = (id) =>
     setTurmasSelecionadas((sel) => sel.includes(id) ? sel.filter((x) => x !== id) : [...sel, id]);
 
-  const adicionarAlunos = async (turmaId) => {
-    const nomes = alunosTexto.split("\n").map((n) => n.trim()).filter(Boolean);
-    if (nomes.length === 0) return;
+  const toggleExpandirTurma = async (turmaId) => {
+    if (turmaExpandida === turmaId) { setTurmaExpandida(null); return; }
+    setTurmaExpandida(turmaId);
+    if (alunosPorTurma[turmaId]) return; // já carregado
+    setCarregandoAlunos(true);
     try {
-      const criados = await api.adicionarAlunosTurma(turmaId, nomes.map((nome) => ({ nome })));
-      setLinksGerados(criados);
-      setAlunosTexto("");
-      setToast?.({ message: `${criados.length} aluno(s) adicionado(s).`, type: "success" });
+      const alunos = await api.listarAlunosTurma(turmaId);
+      setAlunosPorTurma((m) => ({ ...m, [turmaId]: alunos || [] }));
     } catch (e) {
-      setErro(e.message || "Erro ao adicionar alunos.");
+      setErro(e.message || "Erro ao carregar alunos da turma.");
+    } finally {
+      setCarregandoAlunos(false);
+    }
+  };
+
+  const copiarLinkTurma = (link) => {
+    navigator.clipboard?.writeText(link);
+    setToast?.({ message: "Link copiado!", type: "success" });
+  };
+
+  const regenerarLink = async (turmaId) => {
+    if (!confirm("Gerar um novo link vai invalidar o link antigo — quem ainda não entrou vai precisar do link novo. Continuar?")) return;
+    try {
+      const atualizada = await api.regenerarLinkTurma(turmaId);
+      setTurmas((t) => t.map((x) => x.id === turmaId ? atualizada : x));
+      setToast?.({ message: "Novo link gerado.", type: "success" });
+    } catch (e) {
+      setErro(e.message || "Erro ao gerar novo link.");
     }
   };
 
@@ -272,7 +290,7 @@ export default function ClienteVirtualCriarPage({ setToast, cenarioIdInicial = n
   const handleNovo = () => {
     setStep(0); setForm(DEFAULT_FORM); setCenarioId(null);
     setCriterios([]); setFrameworks([]); setTurmasSelecionadas([]);
-    setLinksGerados([]); setPublicado(false); setErro("");
+    setAlunosPorTurma({}); setTurmaExpandida(null); setPublicado(false); setErro("");
   };
 
   // ── render — carregando cenário existente ─────────────────────────────────
@@ -489,7 +507,7 @@ export default function ClienteVirtualCriarPage({ setToast, cenarioIdInicial = n
                     />
                     <span className="flex-1 text-slate-200 text-sm font-medium">{t.nome}</span>
                     <button
-                      onClick={() => setTurmaExpandida(turmaExpandida === t.id ? null : t.id)}
+                      onClick={() => toggleExpandirTurma(t.id)}
                       className="text-xs text-slate-400 hover:text-amber-400 flex items-center gap-1"
                     >
                       <Users size={13} /> Alunos
@@ -497,23 +515,36 @@ export default function ClienteVirtualCriarPage({ setToast, cenarioIdInicial = n
                   </div>
                   {turmaExpandida === t.id && (
                     <div className="border-t border-slate-700/40 p-4 space-y-3">
-                      <textarea
-                        value={alunosTexto}
-                        onChange={(e) => setAlunosTexto(e.target.value)}
-                        placeholder={"Um nome de aluno por linha\nEx:\nMaria Silva\nJoão Souza"}
-                        rows={3}
-                        className="w-full bg-slate-800/60 border border-slate-600/50 rounded-lg px-3 py-2 text-sm text-slate-100 resize-none"
-                      />
-                      <Button size="sm" onClick={() => adicionarAlunos(t.id)}>
-                        <Send size={13} /> Gerar links de acesso
-                      </Button>
-                      {linksGerados.length > 0 && (
-                        <div className="space-y-1.5 pt-2">
-                          {linksGerados.map((a) => (
-                            <LinkAlunoRow key={a.id} aluno={a} />
-                          ))}
+                      <div>
+                        <p className="text-xs text-slate-500 mb-1.5">Link único da turma — compartilhe com todos os alunos. Cada um se identifica com nome + matrícula ao entrar.</p>
+                        <div className="flex items-center gap-2 bg-slate-800/50 rounded-lg px-3 py-2">
+                          <span className="flex-1 text-xs text-amber-300 truncate">{t.link_acesso}</span>
+                          <button onClick={() => copiarLinkTurma(t.link_acesso)} className="flex items-center gap-1 text-xs text-amber-400 hover:text-amber-300 flex-shrink-0">
+                            <Copy size={12} /> Copiar
+                          </button>
                         </div>
-                      )}
+                        <button onClick={() => regenerarLink(t.id)} className="text-xs text-slate-500 hover:text-red-400 mt-1.5">
+                          Gerar novo link (invalida o atual)
+                        </button>
+                      </div>
+
+                      <div className="border-t border-slate-700/30 pt-3">
+                        <p className="text-xs text-slate-500 mb-2">Alunos que já entraram</p>
+                        {carregandoAlunos && !alunosPorTurma[t.id] ? (
+                          <Loader2 size={16} className="text-amber-400 animate-spin" />
+                        ) : (alunosPorTurma[t.id] || []).length === 0 ? (
+                          <p className="text-slate-600 text-xs">Ninguém entrou ainda.</p>
+                        ) : (
+                          <div className="space-y-1.5">
+                            {alunosPorTurma[t.id].map((a) => (
+                              <div key={a.id} className="flex items-center justify-between bg-slate-800/50 rounded-lg px-3 py-2 text-xs">
+                                <span className="text-slate-200">{a.nome}</span>
+                                <span className="text-slate-500">{a.matricula}</span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
                     </div>
                   )}
                 </div>
@@ -555,24 +586,6 @@ export default function ClienteVirtualCriarPage({ setToast, cenarioIdInicial = n
           </button>
         )}
       </div>
-    </div>
-  );
-}
-
-function LinkAlunoRow({ aluno }) {
-  const [copiado, setCopiado] = useState(false);
-  const copiar = () => {
-    navigator.clipboard?.writeText(aluno.link_acesso).then(() => {
-      setCopiado(true);
-      setTimeout(() => setCopiado(false), 1500);
-    });
-  };
-  return (
-    <div className="flex items-center gap-2 bg-slate-800/50 rounded-lg px-3 py-2">
-      <span className="flex-1 text-xs text-slate-300 truncate">{aluno.nome}</span>
-      <button onClick={copiar} className="flex items-center gap-1 text-xs text-amber-400 hover:text-amber-300 flex-shrink-0">
-        {copiado ? <Check size={12} /> : <Copy size={12} />} {copiado ? "Copiado" : "Copiar link"}
-      </button>
     </div>
   );
 }

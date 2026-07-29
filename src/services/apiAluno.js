@@ -6,45 +6,48 @@
  * mesmo singleton arriscaria contaminar o estado de sessão entre papéis na
  * mesma aba do navegador.
  *
- * Sessão: o link único do aluno (access_token) é opaco e permanente — é
- * trocado por um JWT de curta duração (12h) a cada carregamento da página.
- * Persistimos apenas o access_token bruto em localStorage (não o JWT), para
- * que o link salvo/favoritado continue funcionando em visitas futuras.
+ * Sessão: o link é único por TURMA (não por aluno) — quem identifica o aluno
+ * é a matrícula que ele digita ao entrar. A mesma matrícula sempre recupera
+ * o mesmo histórico, mesmo em outro dispositivo. Guardamos nome+matrícula em
+ * localStorage (por turma) só como conveniência, para não pedir de novo no
+ * mesmo aparelho — não é o mecanismo de identificação em si.
  */
 
 const API_BASE = import.meta.env.VITE_API_URL ?? "https://api.appdocentia.com.br/api";
-const STORAGE_KEY = "vcsp_cv_access_token";
+const STORAGE_PREFIX = "vcsp_cv_identidade_";
 
 class ApiAlunoService {
   constructor() {
     this._alunoToken = null;
   }
 
-  getStoredAccessToken() {
-    try { return localStorage.getItem(STORAGE_KEY); } catch { return null; }
+  getIdentidadeSalva(turmaToken) {
+    try {
+      const raw = localStorage.getItem(STORAGE_PREFIX + turmaToken);
+      return raw ? JSON.parse(raw) : null;
+    } catch { return null; }
   }
 
-  saveAccessToken(token) {
-    try { localStorage.setItem(STORAGE_KEY, token); } catch { /* ignore */ }
+  salvarIdentidade(turmaToken, nome, matricula) {
+    try { localStorage.setItem(STORAGE_PREFIX + turmaToken, JSON.stringify({ nome, matricula })); } catch { /* ignore */ }
   }
 
-  clearSession() {
-    this._alunoToken = null;
-    try { localStorage.removeItem(STORAGE_KEY); } catch { /* ignore */ }
+  esquecerIdentidade(turmaToken) {
+    try { localStorage.removeItem(STORAGE_PREFIX + turmaToken); } catch { /* ignore */ }
   }
 
-  /** Troca o access_token (link único) por uma sessão JWT de aluno. */
-  async trocarSessao(accessToken) {
-    const res = await fetch(`${API_BASE}/cliente-virtual/aluno/sessao`, {
+  /** Identifica o aluno (nome + matrícula) pelo link único da turma. */
+  async entrarNaTurma(turmaToken, nome, matricula) {
+    const res = await fetch(`${API_BASE}/cliente-virtual/aluno/turma/${turmaToken}/entrar`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ access_token: accessToken }),
+      body: JSON.stringify({ nome, matricula }),
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(data.detail || "Link de acesso inválido ou expirado.");
 
     this._alunoToken = data.token;
-    this.saveAccessToken(accessToken);
+    this.salvarIdentidade(turmaToken, nome, matricula);
     return data; // { token, aluno_nome, turma_nome }
   }
 

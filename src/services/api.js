@@ -116,12 +116,12 @@ class ApiService {
     return this.request("POST", "/cliente-virtual/professor/turmas", dados);
   }
 
-  adicionarAlunosTurma(turmaId, alunos) {
-    return this.request("POST", `/cliente-virtual/professor/turmas/${turmaId}/alunos`, { alunos });
+  regenerarLinkTurma(turmaId) {
+    return this.request("POST", `/cliente-virtual/professor/turmas/${turmaId}/regenerar-link`);
   }
 
-  regenerarLinkAluno(turmaId, alunoId) {
-    return this.request("POST", `/cliente-virtual/professor/turmas/${turmaId}/alunos/${alunoId}/regenerar-link`);
+  listarAlunosTurma(turmaId) {
+    return this.request("GET", `/cliente-virtual/professor/turmas/${turmaId}/alunos`);
   }
 
   desativarAluno(turmaId, alunoId) {
