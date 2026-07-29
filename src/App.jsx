@@ -19,6 +19,7 @@ function extrairTokenClienteVirtual() {
 
 function AppLayout() {
   const [page, setPage] = useState("dashboard"); // dashboard | criar
+  const [cenarioAberto, setCenarioAberto] = useState(null); // id | null (null = novo cenário)
   const [toast, setToast] = useState(null);
 
   const showToast = (msg) => {
@@ -26,12 +27,23 @@ function AppLayout() {
     else setToast(msg);
   };
 
+  const abrirNovo = () => { setCenarioAberto(null); setPage("criar"); };
+  const abrirExistente = (id) => { setCenarioAberto(id); setPage("criar"); };
+  const voltarDashboard = () => { setCenarioAberto(null); setPage("dashboard"); };
+
   return (
     <>
-      {page === "dashboard" && <DashboardPage onNovoClienteVirtual={() => setPage("criar")} />}
+      {page === "dashboard" && (
+        <DashboardPage onNovoClienteVirtual={abrirNovo} onAbrirCenario={abrirExistente} />
+      )}
       {page === "criar" && (
         <div className="min-h-screen bg-slate-950 p-8">
-          <ClienteVirtualCriarPage setToast={showToast} />
+          <ClienteVirtualCriarPage
+            key={cenarioAberto || "novo"}
+            cenarioIdInicial={cenarioAberto}
+            setToast={showToast}
+            onVoltar={voltarDashboard}
+          />
         </div>
       )}
       {toast && <Toast {...toast} onClose={() => setToast(null)} />}

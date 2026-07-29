@@ -10,7 +10,7 @@ const STATUS_VARIANT = {
   arquivado: "default",
 };
 
-export default function DashboardPage({ onNovoClienteVirtual }) {
+export default function DashboardPage({ onNovoClienteVirtual, onAbrirCenario }) {
   const { user, logout } = useAuth();
   const [cenarios, setCenarios] = useState([]);
   const [carregando, setCarregando] = useState(true);
@@ -54,7 +54,7 @@ export default function DashboardPage({ onNovoClienteVirtual }) {
         ) : (
           <div className="space-y-3">
             {cenarios.map((c) => (
-              <Card key={c.id} className="flex items-center justify-between">
+              <Card key={c.id} onClick={() => onAbrirCenario(c.id)} className="flex items-center justify-between">
                 <div>
                   <p className="text-white font-semibold text-sm">{c.titulo}</p>
                   <p className="text-slate-500 text-xs mt-1">{c.area}</p>

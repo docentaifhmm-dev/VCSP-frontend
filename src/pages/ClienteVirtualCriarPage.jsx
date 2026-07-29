@@ -64,10 +64,11 @@ const DEFAULT_FORM = {
   feedback_modo: "fim_sessao",
 };
 
-export default function ClienteVirtualCriarPage({ setToast }) {
+export default function ClienteVirtualCriarPage({ setToast, cenarioIdInicial = null, onVoltar }) {
   const [step, setStep] = useState(0);
   const [form, setForm] = useState(DEFAULT_FORM);
-  const [cenarioId, setCenarioId] = useState(null);
+  const [cenarioId, setCenarioId] = useState(cenarioIdInicial);
+  const [carregandoCenario, setCarregandoCenario] = useState(!!cenarioIdInicial);
   const [salvando, setSalvando] = useState(false);
   const [erro, setErro] = useState("");
 
@@ -88,6 +89,26 @@ export default function ClienteVirtualCriarPage({ setToast }) {
   const [linksGerados, setLinksGerados] = useState([]);
   const [publicando, setPublicando] = useState(false);
   const [publicado, setPublicado] = useState(false);
+
+  // Reabrindo um cenário já existente (a partir do dashboard) — carrega os
+  // dados já salvos em vez de começar do formulário em branco.
+  useEffect(() => {
+    if (!cenarioIdInicial) return;
+    api.detalharCenarioVirtual(cenarioIdInicial)
+      .then((c) => {
+        setForm({
+          titulo: c.titulo,
+          area: c.area || "geral",
+          persona_desc: c.persona_desc,
+          contexto_cenario: c.contexto_cenario,
+          feedback_modo: c.feedback_modo,
+        });
+        setCriterios(c.criterios_avaliacao || []);
+      })
+      .catch((e) => setErro(e.message || "Erro ao carregar cenário."))
+      .finally(() => setCarregandoCenario(false));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const set = (key, val) => setForm((f) => ({ ...f, [key]: val }));
 
@@ -254,6 +275,16 @@ export default function ClienteVirtualCriarPage({ setToast }) {
     setLinksGerados([]); setPublicado(false); setErro("");
   };
 
+  // ── render — carregando cenário existente ─────────────────────────────────
+
+  if (carregandoCenario) {
+    return (
+      <div className="flex justify-center py-24">
+        <Loader2 size={28} className="text-amber-400 animate-spin" />
+      </div>
+    );
+  }
+
   // ── render — sucesso ──────────────────────────────────────────────────────
 
   if (publicado) {
@@ -264,23 +295,33 @@ export default function ClienteVirtualCriarPage({ setToast }) {
         </div>
         <h1 className="text-2xl font-black text-white">Cliente Virtual publicado!</h1>
         <p className="text-slate-400 text-sm">Os alunos das turmas selecionadas já podem acessar via link individual.</p>
-        <Button onClick={handleNovo}><Plus size={16} /> Criar novo cenário</Button>
+        <div className="flex gap-3 justify-center">
+          <Button onClick={handleNovo}><Plus size={16} /> Criar novo cenário</Button>
+          {onVoltar && <Button variant="secondary" onClick={onVoltar}>Voltar ao painel</Button>}
+        </div>
       </div>
     );
   }
 
   return (
     <div className="space-y-6 max-w-3xl mx-auto">
-      <div>
-        <h1 className="text-2xl font-black text-white flex items-center gap-3">
-          <span className="w-10 h-10 bg-amber-500/20 rounded-xl flex items-center justify-center">
-            <MessageSquare size={22} className="text-amber-400" />
-          </span>
-          Cliente Virtual
-        </h1>
-        <p className="text-slate-400 text-sm mt-1.5 ml-14">
-          Crie uma persona simulada que conversa com o aluno e o avalia contra critérios e normas da sua área
-        </p>
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-black text-white flex items-center gap-3">
+            <span className="w-10 h-10 bg-amber-500/20 rounded-xl flex items-center justify-center">
+              <MessageSquare size={22} className="text-amber-400" />
+            </span>
+            Cliente Virtual
+          </h1>
+          <p className="text-slate-400 text-sm mt-1.5 ml-14">
+            Crie uma persona simulada que conversa com o aluno e o avalia contra critérios e normas da sua área
+          </p>
+        </div>
+        {onVoltar && (
+          <button onClick={onVoltar} className="flex items-center gap-1.5 text-sm text-slate-400 hover:text-amber-400 flex-shrink-0">
+            <ChevronLeft size={16} /> Painel
+          </button>
+        )}
       </div>
 
       <StepIndicator current={step} labels={STEP_LABELS} />
