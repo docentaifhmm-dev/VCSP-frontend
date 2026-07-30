@@ -109,10 +109,14 @@ export default function ClienteVirtualCriarPage({ setToast, cenarioIdInicial = n
   const [turmasPublicadas, setTurmasPublicadas] = useState([]); // turmas já publicadas para este cenário (com link fixo)
   const turmasPreSelecionadasRef = useRef(false);
   const [novaTurmaNome, setNovaTurmaNome] = useState("");
+  const [novaTurmaListaFechada, setNovaTurmaListaFechada] = useState(false);
+  const [novaTurmaAlunosTexto, setNovaTurmaAlunosTexto] = useState("");
   const [criandoTurma, setCriandoTurma] = useState(false);
   const [turmaExpandida, setTurmaExpandida] = useState(null);
   const [alunosPorTurma, setAlunosPorTurma] = useState({}); // turma_id -> lista de alunos
   const [carregandoAlunos, setCarregandoAlunos] = useState(false);
+  const [importarAlunosTexto, setImportarAlunosTexto] = useState({}); // turma_id -> texto do textarea
+  const [importandoAlunos, setImportandoAlunos] = useState(null); // turma_id em andamento
   const [publicando, setPublicando] = useState(false);
   const [publicado, setPublicado] = useState(false);
 
@@ -352,17 +356,58 @@ export default function ClienteVirtualCriarPage({ setToast, cenarioIdInicial = n
     }).catch(() => {});
   }, [step, cenarioId]);
 
+  /** Parseia "Nome, Matrícula" por linha (formato fácil de colar de uma planilha). */
+  const parsearAlunos = (texto) =>
+    texto.split("\n")
+      .map((linha) => linha.trim())
+      .filter(Boolean)
+      .map((linha) => {
+        const [nome, matricula] = linha.split(",").map((p) => p?.trim());
+        return { nome, matricula };
+      })
+      .filter((a) => a.nome && a.matricula);
+
   const criarTurma = async () => {
     if (!novaTurmaNome.trim()) return;
-    setCriandoTurma(true);
+    setCriandoTurma(true); setErro("");
     try {
-      const nova = await api.criarTurmaVirtual({ nome: novaTurmaNome.trim() });
+      const alunos = parsearAlunos(novaTurmaAlunosTexto);
+      const nova = await api.criarTurmaVirtual({
+        nome: novaTurmaNome.trim(),
+        lista_fechada: novaTurmaListaFechada,
+        alunos: alunos.length > 0 ? alunos : undefined,
+      });
       setTurmas((t) => [nova, ...t]);
-      setNovaTurmaNome("");
+      setNovaTurmaNome(""); setNovaTurmaListaFechada(false); setNovaTurmaAlunosTexto("");
     } catch (e) {
       setErro(e.message || "Erro ao criar turma.");
     } finally {
       setCriandoTurma(false);
+    }
+  };
+
+  const importarAlunos = async (turmaId) => {
+    const alunos = parsearAlunos(importarAlunosTexto[turmaId] || "");
+    if (alunos.length === 0) return;
+    setImportandoAlunos(turmaId); setErro("");
+    try {
+      const atualizados = await api.importarAlunosTurma(turmaId, alunos);
+      setAlunosPorTurma((m) => ({ ...m, [turmaId]: atualizados || [] }));
+      setImportarAlunosTexto((m) => ({ ...m, [turmaId]: "" }));
+      setToast?.({ message: "Alunos cadastrados.", type: "success" });
+    } catch (e) {
+      setErro(e.message || "Erro ao cadastrar alunos.");
+    } finally {
+      setImportandoAlunos(null);
+    }
+  };
+
+  const toggleListaFechada = async (turmaId, valorAtual) => {
+    try {
+      const atualizada = await api.atualizarTurmaVirtual(turmaId, { lista_fechada: !valorAtual });
+      setTurmas((t) => t.map((x) => x.id === turmaId ? atualizada : x));
+    } catch (e) {
+      setErro(e.message || "Erro ao atualizar turma.");
     }
   };
 
@@ -743,15 +788,31 @@ export default function ClienteVirtualCriarPage({ setToast, cenarioIdInicial = n
 
           <Card className="space-y-4">
             <h2 className="text-lg font-bold text-white">Turmas</h2>
-            <div className="flex gap-2">
+            <div className="space-y-2">
               <input
                 value={novaTurmaNome}
                 onChange={(e) => setNovaTurmaNome(e.target.value)}
                 placeholder="Nome da nova turma"
-                className="flex-1 bg-slate-800/60 border border-slate-600/50 rounded-xl px-4 py-2.5 text-sm text-slate-100"
+                className="w-full bg-slate-800/60 border border-slate-600/50 rounded-xl px-4 py-2.5 text-sm text-slate-100"
               />
+              <textarea
+                value={novaTurmaAlunosTexto}
+                onChange={(e) => setNovaTurmaAlunosTexto(e.target.value)}
+                placeholder={"Alunos (opcional) — um por linha, no formato:\nNome Completo, Matrícula"}
+                rows={3}
+                className="w-full bg-slate-800/60 border border-slate-600/50 rounded-xl px-4 py-2.5 text-sm text-slate-100 resize-none"
+              />
+              <label className="flex items-center gap-2 text-xs text-slate-400">
+                <input
+                  type="checkbox"
+                  checked={novaTurmaListaFechada}
+                  onChange={(e) => setNovaTurmaListaFechada(e.target.checked)}
+                  className="w-3.5 h-3.5"
+                />
+                Restringir acesso apenas às matrículas listadas acima
+              </label>
               <Button size="sm" onClick={criarTurma} disabled={criandoTurma || !novaTurmaNome.trim()}>
-                <Plus size={14} /> Criar
+                {criandoTurma ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />} Criar turma
               </Button>
             </div>
 
@@ -766,6 +827,9 @@ export default function ClienteVirtualCriarPage({ setToast, cenarioIdInicial = n
                       className="w-4 h-4"
                     />
                     <span className="flex-1 text-slate-200 text-sm font-medium">{t.nome}</span>
+                    {t.lista_fechada && (
+                      <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-sky-900/40 text-sky-400">lista fechada</span>
+                    )}
                     {turmasPublicadas.some((tp) => tp.id === t.id) && (
                       <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-emerald-900/40 text-emerald-400">publicado</span>
                     )}
@@ -791,22 +855,56 @@ export default function ClienteVirtualCriarPage({ setToast, cenarioIdInicial = n
                         </button>
                       </div>
 
+                      <label className="flex items-center gap-2 text-xs text-slate-400 border-t border-slate-700/30 pt-3">
+                        <input
+                          type="checkbox"
+                          checked={!!t.lista_fechada}
+                          onChange={() => toggleListaFechada(t.id, t.lista_fechada)}
+                          className="w-3.5 h-3.5"
+                        />
+                        Restringir acesso apenas às matrículas cadastradas
+                      </label>
+
                       <div className="border-t border-slate-700/30 pt-3">
-                        <p className="text-xs text-slate-500 mb-2">Alunos que já entraram</p>
+                        <p className="text-xs text-slate-500 mb-2">Alunos</p>
                         {carregandoAlunos && !alunosPorTurma[t.id] ? (
                           <Loader2 size={16} className="text-amber-400 animate-spin" />
                         ) : (alunosPorTurma[t.id] || []).length === 0 ? (
-                          <p className="text-slate-600 text-xs">Ninguém entrou ainda.</p>
+                          <p className="text-slate-600 text-xs">Nenhum aluno cadastrado ainda.</p>
                         ) : (
                           <div className="space-y-1.5">
                             {alunosPorTurma[t.id].map((a) => (
                               <div key={a.id} className="flex items-center justify-between bg-slate-800/50 rounded-lg px-3 py-2 text-xs">
                                 <span className="text-slate-200">{a.nome}</span>
-                                <span className="text-slate-500">{a.matricula}</span>
+                                <div className="flex items-center gap-2">
+                                  <span className="text-slate-500">{a.matricula}</span>
+                                  {!a.ultimo_acesso_em && (
+                                    <span className="text-slate-600">aguardando acesso</span>
+                                  )}
+                                </div>
                               </div>
                             ))}
                           </div>
                         )}
+                      </div>
+
+                      <div className="border-t border-slate-700/30 pt-3 space-y-2">
+                        <p className="text-xs text-slate-500">Adicionar alunos (registro acadêmico)</p>
+                        <textarea
+                          value={importarAlunosTexto[t.id] || ""}
+                          onChange={(e) => setImportarAlunosTexto((m) => ({ ...m, [t.id]: e.target.value }))}
+                          placeholder={"Um por linha, no formato:\nNome Completo, Matrícula"}
+                          rows={2}
+                          className="w-full bg-slate-800/60 border border-slate-600/50 rounded-lg px-3 py-2 text-xs text-slate-100 resize-none"
+                        />
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          onClick={() => importarAlunos(t.id)}
+                          disabled={importandoAlunos === t.id || !(importarAlunosTexto[t.id] || "").trim()}
+                        >
+                          {importandoAlunos === t.id ? <Loader2 size={13} className="animate-spin" /> : <Plus size={13} />} Cadastrar
+                        </Button>
                       </div>
                     </div>
                   )}
