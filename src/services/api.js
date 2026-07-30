@@ -192,6 +192,10 @@ class ApiService {
     return this.request("POST", `/cliente-virtual/professor/cenarios/${id}/publicar`, { turma_ids: turmaIds });
   }
 
+  listarTurmasPublicadasCenario(id) {
+    return this.request("GET", `/cliente-virtual/professor/cenarios/${id}/turmas-publicadas`);
+  }
+
   // ── Cadastro Docente — Disciplinas ────────────────────────────────────────
 
   listarDisciplinas() {

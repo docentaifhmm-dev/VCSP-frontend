@@ -2,6 +2,8 @@ import { useState } from "react";
 import { AuthProvider, useAuth } from "./contexts/AuthContext";
 import { Toast } from "./components/ui";
 import AuthPage from "./pages/AuthPage";
+import HomePage from "./pages/HomePage";
+import DisciplinasPage from "./pages/DisciplinasPage";
 import DashboardPage from "./pages/DashboardPage";
 import ClienteVirtualCriarPage from "./pages/ClienteVirtualCriarPage";
 import ClienteVirtualAlunoApp from "./pages/ClienteVirtualAlunoApp";
@@ -18,7 +20,7 @@ function extrairTokenClienteVirtual() {
 }
 
 function AppLayout() {
-  const [page, setPage] = useState("dashboard"); // dashboard | criar
+  const [page, setPage] = useState("home"); // home | disciplinas | dashboard | criar
   const [cenarioAberto, setCenarioAberto] = useState(null); // id | null (null = novo cenário)
   const [toast, setToast] = useState(null);
 
@@ -29,12 +31,22 @@ function AppLayout() {
 
   const abrirNovo = () => { setCenarioAberto(null); setPage("criar"); };
   const abrirExistente = (id) => { setCenarioAberto(id); setPage("criar"); };
-  const voltarDashboard = () => { setCenarioAberto(null); setPage("dashboard"); };
+  const voltarHome = () => { setCenarioAberto(null); setPage("home"); };
 
   return (
     <>
+      {page === "home" && (
+        <HomePage
+          onAcessarDisciplinas={() => setPage("disciplinas")}
+          onNovoClienteVirtual={abrirNovo}
+          onAcessarClientes={() => setPage("dashboard")}
+        />
+      )}
+      {page === "disciplinas" && (
+        <DisciplinasPage onVoltar={voltarHome} setToast={showToast} />
+      )}
       {page === "dashboard" && (
-        <DashboardPage onNovoClienteVirtual={abrirNovo} onAbrirCenario={abrirExistente} />
+        <DashboardPage onNovoClienteVirtual={abrirNovo} onAbrirCenario={abrirExistente} onVoltar={voltarHome} />
       )}
       {page === "criar" && (
         <div className="min-h-screen bg-slate-950 p-8">
@@ -42,7 +54,7 @@ function AppLayout() {
             key={cenarioAberto || "novo"}
             cenarioIdInicial={cenarioAberto}
             setToast={showToast}
-            onVoltar={voltarDashboard}
+            onVoltar={voltarHome}
           />
         </div>
       )}

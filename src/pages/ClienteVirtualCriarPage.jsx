@@ -106,6 +106,8 @@ export default function ClienteVirtualCriarPage({ setToast, cenarioIdInicial = n
 
   const [turmas, setTurmas] = useState([]);
   const [turmasSelecionadas, setTurmasSelecionadas] = useState([]);
+  const [turmasPublicadas, setTurmasPublicadas] = useState([]); // turmas já publicadas para este cenário (com link fixo)
+  const turmasPreSelecionadasRef = useRef(false);
   const [novaTurmaNome, setNovaTurmaNome] = useState("");
   const [criandoTurma, setCriandoTurma] = useState(false);
   const [turmaExpandida, setTurmaExpandida] = useState(null);
@@ -337,7 +339,18 @@ export default function ClienteVirtualCriarPage({ setToast, cenarioIdInicial = n
   useEffect(() => {
     if (step !== 4) return;
     api.listarTurmasVirtuais().then((data) => setTurmas(data || [])).catch(() => {});
-  }, [step]);
+    if (!cenarioId) return;
+    api.listarTurmasPublicadasCenario(cenarioId).then((data) => {
+      const publicadas = data || [];
+      setTurmasPublicadas(publicadas);
+      // Pré-marca as turmas já publicadas apenas na primeira vez que a etapa é
+      // aberta — evita sobrescrever seleções que o professor já ajustou.
+      if (!turmasPreSelecionadasRef.current) {
+        turmasPreSelecionadasRef.current = true;
+        setTurmasSelecionadas((sel) => sel.length > 0 ? sel : publicadas.map((t) => t.id));
+      }
+    }).catch(() => {});
+  }, [step, cenarioId]);
 
   const criarTurma = async () => {
     if (!novaTurmaNome.trim()) return;
@@ -391,6 +404,8 @@ export default function ClienteVirtualCriarPage({ setToast, cenarioIdInicial = n
     setPublicando(true); setErro("");
     try {
       await api.publicarCenarioVirtual(cenarioId, turmasSelecionadas);
+      const publicadas = await api.listarTurmasPublicadasCenario(cenarioId).catch(() => []);
+      setTurmasPublicadas(publicadas || []);
       setPublicado(true);
       setToast?.({ message: "Cenário publicado com sucesso!", type: "success" });
       window.dispatchEvent(new CustomEvent("atividadeGerada", { detail: { tipo: "cliente-virtual" } }));
@@ -403,7 +418,8 @@ export default function ClienteVirtualCriarPage({ setToast, cenarioIdInicial = n
 
   const handleNovo = () => {
     setStep(0); setForm(DEFAULT_FORM); setCenarioId(null);
-    setCriterios([]); setFrameworks([]); setTurmasSelecionadas([]);
+    setCriterios([]); setFrameworks([]); setTurmasSelecionadas([]); setTurmasPublicadas([]);
+    turmasPreSelecionadasRef.current = false;
     setAlunosPorTurma({}); setTurmaExpandida(null); setPublicado(false); setErro("");
     setDisciplinaId(null); setConhecimento(null); setPlanoDocs([]);
     setCompetenciasSelecionadas([]); setHabilidadesSelecionadas([]); setAprendizagensSelecionadas([]);
@@ -424,12 +440,35 @@ export default function ClienteVirtualCriarPage({ setToast, cenarioIdInicial = n
 
   if (publicado) {
     return (
-      <div className="space-y-6 max-w-2xl mx-auto text-center py-8">
-        <div className="w-16 h-16 bg-emerald-500/20 rounded-2xl flex items-center justify-center mx-auto">
-          <CheckCircle2 size={32} className="text-emerald-400" />
+      <div className="space-y-6 max-w-2xl mx-auto py-8">
+        <div className="text-center space-y-4">
+          <div className="w-16 h-16 bg-emerald-500/20 rounded-2xl flex items-center justify-center mx-auto">
+            <CheckCircle2 size={32} className="text-emerald-400" />
+          </div>
+          <h1 className="text-2xl font-black text-white">Cliente Virtual publicado!</h1>
+          <p className="text-slate-400 text-sm">
+            O link de cada turma é fixo — pode ser reutilizado sempre que você quiser que os
+            alunos façam esta atividade novamente, em qualquer semestre.
+          </p>
         </div>
-        <h1 className="text-2xl font-black text-white">Cliente Virtual publicado!</h1>
-        <p className="text-slate-400 text-sm">Os alunos das turmas selecionadas já podem acessar via link individual.</p>
+
+        {turmasPublicadas.length > 0 && (
+          <Card className="space-y-2">
+            <p className="text-sm font-bold text-white">Links para compartilhar com os alunos</p>
+            {turmasPublicadas.map((t) => (
+              <div key={t.id} className="flex items-center justify-between gap-3 bg-slate-900/40 border border-slate-700/40 rounded-xl px-4 py-3">
+                <div className="min-w-0">
+                  <p className="text-slate-200 text-sm font-medium truncate">{t.nome}</p>
+                  <p className="text-amber-300/80 text-xs truncate">{t.link_acesso}</p>
+                </div>
+                <button onClick={() => copiarLinkTurma(t.link_acesso)} className="flex items-center gap-1.5 text-xs font-semibold text-amber-400 hover:text-amber-300 flex-shrink-0 bg-amber-500/10 hover:bg-amber-500/20 rounded-lg px-3 py-2">
+                  <Copy size={13} /> Copiar
+                </button>
+              </div>
+            ))}
+          </Card>
+        )}
+
         <div className="flex gap-3 justify-center">
           <Button onClick={handleNovo}><Plus size={16} /> Criar novo cenário</Button>
           {onVoltar && <Button variant="secondary" onClick={onVoltar}>Voltar ao painel</Button>}
@@ -727,6 +766,9 @@ export default function ClienteVirtualCriarPage({ setToast, cenarioIdInicial = n
                       className="w-4 h-4"
                     />
                     <span className="flex-1 text-slate-200 text-sm font-medium">{t.nome}</span>
+                    {turmasPublicadas.some((tp) => tp.id === t.id) && (
+                      <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-emerald-900/40 text-emerald-400">publicado</span>
+                    )}
                     <button
                       onClick={() => toggleExpandirTurma(t.id)}
                       className="text-xs text-slate-400 hover:text-amber-400 flex items-center gap-1"
